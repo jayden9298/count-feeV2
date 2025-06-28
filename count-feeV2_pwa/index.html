@@ -1,0 +1,149 @@
+
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>租屋費用計算器</title>
+  <link rel="manifest" href="manifest.json">
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js')
+          .then(registration => {
+            console.log('Service Worker registered with scope:', registration.scope);
+          })
+          .catch(error => {
+            console.log('Service Worker registration failed:', error);
+          });
+      });
+    }
+  </script>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 700px; margin: 1rem auto; padding: 0 1rem; }
+    h1 { text-align: center; }
+    label { display: block; margin-top: 0.8rem; }
+    input[type="number"], input[type="text"] { width: 100%; padding: 6px; box-sizing: border-box; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+    .btn { margin-top: 1rem; padding: 10px 15px; font-size: 1rem; }
+    .note { font-size: 0.9rem; color: #555; margin-top: 0.3rem; }
+  </style>
+</head>
+<body>
+
+<h1>租屋費用計算器</h1>
+
+<form id="inputForm">
+  <label>用電總度數 <input type="number" id="totalUsage" min="0" step="any" required /></label>
+  <label>用電總金額（元） <input type="number" id="totalElectricCost" min="0" step="any" required /></label>
+  <label>水費（元） <input type="number" id="waterCost" min="0" step="any" required /></label>
+  <label>瓦斯費（元） <input type="number" id="gasCost" min="0" step="any" required /></label>
+  <label>其他費用（元） <input type="number" id="otherCost" min="0" step="any" required /></label>
+  <label>其他費用備註 <input type="text" id="otherNote" placeholder="可寫備註..." /></label>
+  <label>人數 <input type="number" id="peopleCount" min="1" max="20" required /></label>
+  <button type="button" class="btn" onclick="generatePeopleInputs()">設定住戶資料</button>
+</form>
+
+<div id="peopleInputsContainer"></div>
+
+<button type="button" class="btn" onclick="calculateCosts()">計算費用</button>
+
+<div id="resultArea"></div>
+
+<script>
+  function generatePeopleInputs() {
+    const container = document.getElementById('peopleInputsContainer');
+    container.innerHTML = '';
+    const peopleCount = parseInt(document.getElementById('peopleCount').value);
+    if (isNaN(peopleCount) || peopleCount < 1) {
+      alert('請輸入有效人數');
+      return;
+    }
+    for (let i = 0; i < peopleCount; i++) {
+      const div = document.createElement('div');
+      div.style.marginTop = '1rem';
+      div.innerHTML = `
+        <strong>住戶 ${i + 1}</strong><br/>
+        <label>姓名 <input type="text" id="name_${i}" placeholder="請輸入姓名" required /></label>
+        <label>上次電表度數 <input type="number" id="prevMeter_${i}" min="0" step="any" required /></label>
+        <label>本次電表度數 <input type="number" id="currentMeter_${i}" min="0" step="any" required /></label>
+      `;
+      container.appendChild(div);
+    }
+  }
+
+  function calculateCosts() {
+    const totalUsage = parseFloat(document.getElementById('totalUsage').value);
+    const totalElectricCost = parseFloat(document.getElementById('totalElectricCost').value);
+    const waterCost = parseFloat(document.getElementById('waterCost').value);
+    const gasCost = parseFloat(document.getElementById('gasCost').value);
+    const otherCost = parseFloat(document.getElementById('otherCost').value);
+    const otherNote = document.getElementById('otherNote').value.trim();
+    const peopleCount = parseInt(document.getElementById('peopleCount').value);
+
+    if ([totalUsage, totalElectricCost, waterCost, gasCost, otherCost].some(isNaN) || isNaN(peopleCount) || peopleCount < 1) {
+      alert('請確認所有欄位皆已正確填寫');
+      return;
+    }
+
+    const avgElectricCostPerUnit = totalElectricCost / totalUsage;
+    let sumUsage = 0;
+    let html = `<table><thead>
+      <tr><th>姓名</th><th>電費 (含小數)</th><th>電費 (無小數)</th><th>備註</th></tr>
+      </thead><tbody>`;
+    const electricCostsRaw = [];
+    const electricCostsFloor = [];
+
+    for (let i = 0; i < peopleCount; i++) {
+      const name = document.getElementById(`name_${i}`).value.trim() || `住戶${i+1}`;
+      const prevMeter = parseFloat(document.getElementById(`prevMeter_${i}`).value);
+      const currentMeter = parseFloat(document.getElementById(`currentMeter_${i}`).value);
+      if (isNaN(prevMeter) || isNaN(currentMeter) || currentMeter < prevMeter) {
+        alert(`請確認第 ${i+1} 位住戶電表度數輸入正確`);
+        return;
+      }
+      const usage = currentMeter - prevMeter;
+      sumUsage += usage;
+      const costRaw = usage * avgElectricCostPerUnit;
+      electricCostsRaw.push(costRaw);
+      electricCostsFloor.push(Math.floor(costRaw));
+    }
+
+    const totalFloorElectricCost = electricCostsFloor.reduce((a,b)=>a+b,0);
+    const electricCostRemainder = totalElectricCost - totalFloorElectricCost;
+    const otherTotal = waterCost + gasCost + otherCost + electricCostRemainder;
+    const otherPerPerson = otherTotal / peopleCount;
+
+    for (let i = 0; i < peopleCount; i++) {
+      const name = document.getElementById(`name_${i}`).value.trim() || `住戶${i+1}`;
+      const costRaw = electricCostsRaw[i];
+      const costFloor = Math.floor(costRaw);
+      const perPersonOther = otherPerPerson;
+      const totalRaw = costRaw + perPersonOther;
+      const totalFloor = Math.floor(totalRaw);
+
+      html += `<tr>
+        <td>${name}</td>
+        <td>${totalRaw.toFixed(2)}</td>
+        <td>${totalFloor}</td>
+        <td>${otherNote}</td>
+      </tr>`;
+    }
+    html += `</tbody></table>`;
+
+    let sumFloorTotal = 0;
+    for(let i=0; i<peopleCount; i++){
+      const costRaw = electricCostsRaw[i];
+      const perPersonOther = otherPerPerson;
+      const totalRaw = costRaw + perPersonOther;
+      sumFloorTotal += Math.floor(totalRaw);
+    }
+
+    html += `<p><strong>捨去小數後各人費用總和：</strong>${sumFloorTotal} 元</p>`;
+    document.getElementById('resultArea').innerHTML = html;
+  }
+</script>
+
+</body>
+</html>
